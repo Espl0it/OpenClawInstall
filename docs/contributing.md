@@ -8,11 +8,11 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/zhengweiyu/openclaw.git
+git clone https://github.com/Espl0it/OpenClawInstall.git
 cd openclaw
 
 # 检查脚本语法
-bash -n openclaw_secure_install.sh
+bash -n install.sh
 bash -n gateway_fix.sh
 
 # 运行测试

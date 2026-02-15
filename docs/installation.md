@@ -9,26 +9,26 @@
 ### 基础安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_secure_install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash
 ```
 
 ### 高级安装选项
 
 ```bash
 # 自动安装（无交互）
-AUTO_ACCEPT=1 curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_secure_install.sh | bash
+AUTO_ACCEPT=1 curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash
 
 # 选择LLM提供商
-LLM_PROVIDER=claude curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_secure_install.sh | bash
+LLM_PROVIDER=claude curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash
 
 # 调试模式
-DEBUG=1 curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_secure_install.sh | bash
+DEBUG=1 curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash
 
 # 跳过Tailscale安装
-SKIP_TAILSCALE=1 curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_secure_install.sh | bash
+SKIP_TAILSCALE=1 curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash
 
 # 组合选项
-AUTO_ACCEPT=1 LLM_PROVIDER=minimax DEBUG=1 curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_secure_install.sh | bash
+AUTO_ACCEPT=1 LLM_PROVIDER=minimax DEBUG=1 curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash
 ```
 
 ### 支持的 LLM 提供商
@@ -43,12 +43,12 @@ AUTO_ACCEPT=1 LLM_PROVIDER=minimax DEBUG=1 curl -fsSL https://raw.githubusercont
 
 ```bash
 # 克隆仓库
-git clone https://github.com/zhengweiyu/openclaw.git
+git clone https://github.com/Espl0it/OpenClawInstall.git
 cd openclaw
-chmod +x openclaw_secure_install.sh
+chmod +x install.sh
 
 # 运行安装脚本
-./openclaw_secure_install.sh
+./install.sh
 ```
 
 ## 📋 系统要求

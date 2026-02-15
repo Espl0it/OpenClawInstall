@@ -60,13 +60,13 @@ export http_proxy=http://proxy.company.com:8080
 
 ```bash
 # 在线修复（推荐）
-curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/gateway_fix.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/gateway_fix.sh | bash
 
 # 自动修复指定用户
-TARGET_USER=ubuntu AUTO_ACCEPT=1 curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/gateway_fix.sh | bash
+TARGET_USER=ubuntu AUTO_ACCEPT=1 curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/gateway_fix.sh | bash
 
 # 调试模式修复
-DEBUG=1 curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/gateway_fix.sh | bash
+DEBUG=1 curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/gateway_fix.sh | bash
 ```
 
 **修复脚本解决的问题：**
@@ -118,7 +118,7 @@ rm -rf ~/.openclaw
 npm uninstall -g @openclaw/cli 2>/dev/null || true
 
 # 重新安装
-curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_secure_install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash
 ```
 
-> 说明：原文档中的 `online_install.sh` 已改为使用 `openclaw_secure_install.sh` 以与当前仓库一致。
+> 说明：原文档中的 `online_install.sh` 已改为使用 `install.sh` 以与当前仓库一致。

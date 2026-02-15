@@ -12,16 +12,16 @@
 
 - **文档**: https://openclaw.ai/docs
 - **社区**: https://community.openclaw.ai
-- **GitHub**: https://github.com/zhengweiyu/openclaw
+- **GitHub**: https://github.com/Espl0it/OpenClawInstall
 
 ## 获取帮助
 
 ```bash
 # 安装脚本帮助
-curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_secure_install.sh | bash --help
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash --help
 
 # Gateway 修复脚本帮助
-curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/gateway_fix.sh | bash --help
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/gateway_fix.sh | bash --help
 
 # Git 提交脚本帮助
 ./git_commit.sh --help
@@ -37,7 +37,7 @@ openclaw support
 
 如遇到问题，可通过以下方式反馈：
 
-1. [GitHub Issues](https://github.com/zhengweiyu/openclaw/issues)
+1. [GitHub Issues](https://github.com/Espl0it/OpenClawInstall/issues)
 2. 社区论坛
 3. 支持邮件: zhengweiyu@gmail.com
 

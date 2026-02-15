@@ -145,7 +145,7 @@ feat: 更新 OpenClaw 部署和文档
 - 添加多LLM提供商支持
 
 影响文件:
-- 安装脚本: online_install.sh
+- 安装脚本: install.sh
 - 文档: README.md
 - 工具: git_commit.sh
 EOF

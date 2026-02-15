@@ -2,13 +2,13 @@
 
 # OpenClaw 安全安装脚本
 # 版本: 2.1
-# 使用方法: curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_secure_install.sh | bash
+# 使用方法: curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash
 
 set -euo pipefail
 
 # ==================== 配置 ====================
 readonly SCRIPT_VERSION="2.1"
-readonly SCRIPT_URL="https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_secure_install.sh"
+readonly SCRIPT_URL="https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh"
 
 # 颜色定义
 readonly RED='\033[0;31m'
@@ -571,7 +571,7 @@ show_completion_guide() {
     echo -e "${CYAN}📚 文档和支持:${NC}"
     echo "• 官方文档: https://openclaw.ai/docs"
     echo "• 社区支持: https://community.openclaw.ai"
-    echo "• GitHub仓库: https://github.com/zhengweiyu/openclaw"
+    echo "• GitHub仓库: https://github.com/Espl0it/OpenClawInstall"
     echo
     echo -e "${GREEN}✨ 感谢使用 OpenClaw！${NC}"
     echo

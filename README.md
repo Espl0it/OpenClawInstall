@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Shell Script](https://img.shields.io/badge/Shell-Bash-green.svg)](https://www.gnu.org/software/bash/)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Ubuntu-blue.svg)](https://github.com/zhengweiyu/openclaw)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Ubuntu-blue.svg)](https://github.com/Espl0it/OpenClawInstall)
 
 ## 📋 概述
 
@@ -20,7 +20,7 @@ OpenClaw 跨平台安全部署脚本是一个自动化安装和配置 OpenClaw A
 
 ```bash
 # 一键安装（推荐）
-curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_secure_install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash
 ```
 
 更多安装方式与选项见 **[安装指南](docs/installation.md)**。

@@ -31,7 +31,7 @@ AUTO_ACCEPT=1 ./git_commit.sh quick
 
 ```bash
 # 查看帮助
-curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_secure_install.sh | bash --help
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash --help
 ```
 
 ## Gateway 修复脚本
@@ -40,13 +40,13 @@ curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/openclaw_s
 
 ```bash
 # 在线修复
-curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/gateway_fix.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/gateway_fix.sh | bash
 
 # 自动修复指定用户
-TARGET_USER=ubuntu AUTO_ACCEPT=1 curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/gateway_fix.sh | bash
+TARGET_USER=ubuntu AUTO_ACCEPT=1 curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/gateway_fix.sh | bash
 
 # 查看帮助
-curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/gateway_fix.sh | bash --help
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/gateway_fix.sh | bash --help
 ```
 
 更多 Gateway 相关问题与手动验证命令见 [故障排除 - Gateway 服务修复](troubleshooting.md#6-gateway-服务修复)。

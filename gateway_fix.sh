@@ -2,13 +2,13 @@
 
 # OpenClaw Gateway 修复脚本
 # 版本: 1.1
-# 用法: curl -fsSL https://raw.githubusercontent.com/zhengweiyu/openclaw/main/gateway_fix.sh | bash
+# 用法: curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/gateway_fix.sh | bash
 
 set -eo pipefail
 
 # ==================== 配置 ====================
 readonly SCRIPT_VERSION="1.1"
-readonly SCRIPT_URL="https://raw.githubusercontent.com/zhengweiyu/openclaw/main/gateway_fix.sh"
+readonly SCRIPT_URL="https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/gateway_fix.sh"
 readonly DEBUG="${DEBUG:-0}"
 readonly AUTO_ACCEPT="${AUTO_ACCEPT:-1}"
 readonly TARGET_USER="${TARGET_USER:-}"
