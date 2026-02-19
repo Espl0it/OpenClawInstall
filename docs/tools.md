@@ -4,49 +4,102 @@
 
 [← 返回 README](../README.md)
 
-## Git 提交工具
+## install.sh - 主安装脚本
 
-项目包含统一的 Git 提交工具，支持完整和快速两种模式：
+### 基本用法
+
+```bash
+# 标准安装
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash
+
+# Docker 模式
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash -s -- --mode docker
+
+# 查看帮助
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash -s -- --help
+```
+
+### 常用选项
+
+| 选项 | 说明 |
+|------|------|
+| `-h, --help` | 显示帮助 |
+| `-v, --verbose` | 详细输出 |
+| `-n, --dry-run` | 模拟运行 |
+| `--mode MODE` | 安装模式 (native/docker) |
+| `--config FILE` || `--uninstall 配置文件路径 |
+` | 卸载 OpenClaw |
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DEBUG` | 0 | 调试模式 |
+| `VERBOSE` | 0 | 详细输出 |
+| `DRY_RUN` | 0 | 模拟运行 |
+| `AUTO_ACCEPT` | 0 | 自动确认 |
+| `LLM_PROVIDER` | minimax | LLM 提供商 |
+| `SKIP_TAILSCALE` | 0 | 跳过 Tailscale |
+| `INSTALL_MODE` | native | 安装模式 |
+
+### 配置文件示例
+
+```bash
+# 创建配置文件
+cat > ~/.openclaw/install.conf << 'EOF'
+LLM_PROVIDER=minimax
+AUTO_ACCEPT=1
+SKIP_TAILSCALE=1
+VERBOSE=1
+EOF
+
+# 使用配置安装
+curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash -s -- --config ~/.openclaw/install.conf
+```
+
+## git_commit.sh - Git 提交工具
 
 ```bash
 # 完整模式（默认）- 创建分支，交互式提交
 ./git_commit.sh
 
-# 快速模式 - 直接提交当前更改
+# 快速模式 - 直接提交
 ./git_commit.sh quick
 
-# 自动推送快速模式
+# 自动推送
 ./git_commit.sh --auto-push quick
 
-# 无交互提交
+# 无交互
 AUTO_ACCEPT=1 ./git_commit.sh quick
 
-# 查看帮助
+# 帮助
 ./git_commit.sh --help
 ```
 
-## 安全安装脚本
-
-集成了完整的安装流程，支持多种配置选项：
-
-```bash
-# 查看帮助
-curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash --help
-```
-
-## Gateway 修复脚本
-
-专门修复 OpenClaw Gateway 服务的 systemd 用户服务问题：
+## gateway_fix.sh - Gateway 修复脚本
 
 ```bash
 # 在线修复
 curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/gateway_fix.sh | bash
 
-# 自动修复指定用户
+# 自动修复
 TARGET_USER=ubuntu AUTO_ACCEPT=1 curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/gateway_fix.sh | bash
 
-# 查看帮助
+# 帮助
 curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/gateway_fix.sh | bash --help
 ```
 
-更多 Gateway 相关问题与手动验证命令见 [故障排除 - Gateway 服务修复](troubleshooting.md#6-gateway-服务修复)。
+## OpenClaw 内置命令
+
+安装完成后可使用以下命令：
+
+```bash
+openclaw gateway start   # 启动网关
+openclaw gateway stop    # 停止网关
+openclaw status          # 查看状态
+openclaw onboard         # 初始化配置
+openclaw doctor          # 健康检查
+openclaw token           # 获取 Token
+```
+
+详见 [故障排除](./troubleshooting.md)

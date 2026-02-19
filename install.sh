@@ -1,14 +1,20 @@
 #!/bin/bash
 
 # OpenClaw 安全安装脚本
-# 版本: 2.1
+# 版本: 3.0
 # 使用方法: curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh | bash
+# 下载: curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh -o install.sh
 
 set -euo pipefail
 
+# ==================== 安全强化 ====================
+# 设置安全的文件权限
+umask 077
+
 # ==================== 配置 ====================
-readonly SCRIPT_VERSION="2.1"
+readonly SCRIPT_VERSION="3.0"
 readonly SCRIPT_URL="https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/install.sh"
+readonly SCRIPT_SHA256_URL="${SCRIPT_URL}.sha256"
 
 # 颜色定义
 readonly RED='\033[0;31m'
@@ -19,20 +25,32 @@ readonly PURPLE='\033[0;35m'
 readonly CYAN='\033[0;36m'
 readonly NC='\033[0m'
 
-# 全局配置
+# 全局配置（支持环境变量和配置文件）
 readonly DEBUG="${DEBUG:-0}"
 readonly AUTO_ACCEPT="${AUTO_ACCEPT:-0}"
 readonly SKIP_TAILSCALE="${SKIP_TAILSCALE:-0}"
+readonly SKIP_DOCKER="${SKIP_DOCKER:-0}"
 readonly LLM_PROVIDER="${LLM_PROVIDER:-minimax}"
 readonly INSTALL_DIR="${INSTALL_DIR:-$HOME/.openclaw}"
+readonly VERBOSE="${VERBOSE:-0}"
+readonly DRY_RUN="${DRY_RUN:-0}"
+readonly INSTALL_MODE="${INSTALL_MODE:-native}"  # native | docker
 
-# 日志函数
+# 配置文件路径
+readonly CONFIG_FILE="${CONFIG_FILE:-$HOME/.openclaw/install.conf}"
+
+# ==================== 日志函数 ====================
 log() {
     local level="$1"
     shift
     local message="$*"
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # 详细模式下显示更多调试信息
+    if [[ "${VERBOSE}" == "1" ]] && [[ "$level" == "DEBUG" ]]; then
+        echo -e "${CYAN}[DEBUG]${NC} $message"
+    fi
     
     case "$level" in
         "INFO")
@@ -44,13 +62,15 @@ log() {
         "ERROR")
             echo -e "${RED}[ERROR]${NC} $message" >&2
             ;;
-        "DEBUG")
-            [[ "${DEBUG}" == "1" ]] && echo -e "${CYAN}[DEBUG]${NC} $message"
+        "SUCCESS")
+            echo -e "${GREEN}[OK]${NC} $message"
             ;;
     esac
     
-    # 尝试写入日志文件（如果可能）
-    local log_file="/tmp/openclaw_install_$(date +%s).log"
+    # 写入日志文件
+    local log_dir="${INSTALL_DIR}/logs"
+    mkdir -p "$log_dir"
+    local log_file="$log_dir/install_$(date +%Y%m%d).log"
     echo "[$timestamp] [$level] $message" >> "$log_file" 2>/dev/null || true
 }
 
@@ -66,10 +86,165 @@ command_exists() {
     command -v "$1" &> /dev/null
 }
 
-# 确认对话框（非交互模式下跳过）
+# ==================== 参数解析 ====================
+show_help() {
+    cat << EOF
+OpenClaw 安全安装脚本 v${SCRIPT_VERSION}
+
+用法: 
+  curl -fsSL $SCRIPT_URL | bash [选项]
+  curl -fsSL $SCRIPT_URL -o install.sh && bash install.sh [选项]
+
+选项:
+  -h, --help              显示帮助信息
+  -v, --verbose           详细输出模式
+  -n, --dry-run           模拟运行（不执行实际操作）
+  --mode MODE             安装模式: native | docker (默认: native)
+  --config FILE           配置文件路径
+  --uninstall             卸载 OpenClaw
+
+环境变量:
+  DEBUG=1                 启用调试模式
+  AUTO_ACCEPT=1           自动确认所有提示
+  VERBOSE=1               详细输出
+  DRY_RUN=1               模拟运行
+  SKIP_TAILSCALE=1        跳过 Tailscale 安装
+  SKIP_DOCKER=1           跳过 Docker 模式选项
+  LLM_PROVIDER=<name>     LLM提供商 (minimax/claude/gpt/ollama)
+  INSTALL_DIR=<path>      安装目录
+
+配置文件格式 (${CONFIG_FILE}):
+  LLM_PROVIDER=minimax
+  AUTO_ACCEPT=1
+  SKIP_TAILSCALE=1
+
+示例:
+  # 标准安装
+  curl -fsSL $SCRIPT_URL | bash
+
+  # Docker 模式安装
+  curl -fsSL $SCRIPT_URL | bash -- --mode docker
+
+  # 模拟运行检查
+  DRY_RUN=1 curl -fsSL $SCRIPT_URL | bash
+
+  # 使用配置文件
+  curl -fsSL $SCRIPT_URL | bash -- --config /path/to/config
+EOF
+    exit 0
+}
+
+# 解析命令行参数
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                show_help
+                ;;
+            -v|--verbose)
+                export VERBOSE=1
+                shift
+                ;;
+            -n|--dry-run)
+                export DRY_RUN=1
+                log "INFO" "🚧 模拟运行模式 - 不会执行实际操作"
+                shift
+                ;;
+            --mode)
+                export INSTALL_MODE="$2"
+                shift 2
+                ;;
+            --config)
+                export CONFIG_FILE="$2"
+                shift 2
+                ;;
+            --uninstall)
+                uninstall_openclaw
+                exit 0
+                ;;
+            *)
+                log "WARN" "未知参数: $1"
+                shift
+                ;;
+        esac
+    done
+}
+
+# 加载配置文件
+load_config() {
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        log "INFO" "加载配置文件: ${CONFIG_FILE}"
+        # shellcheck source=/dev/null
+        source "${CONFIG_FILE}"
+    fi
+}
+
+# ==================== 安全检查 ====================
+check_security() {
+    log "INFO" "🔒 执行安全检查..."
+    
+    # 检查 Bash 版本 (Shellshock 漏洞)
+    local bash_version
+    bash_version=$(bash --version | head -1 | grep -oP '\d+\.\d+')
+    local major minor
+    major=$(echo "$bash_version" | cut -d. -f1)
+    minor=$(echo "$bash_version" | cut -d. -f2)
+    
+    if [[ "$major" -lt 4 ]]; then
+        error_exit "Bash 版本过低 ($bash_version)，存在安全风险"
+    elif [[ "$major" -eq 4 ]] && [[ "$minor" -lt 1 ]]; then
+        log "WARN" "Bash 4.1 以下版本存在 Shellshock 漏洞风险"
+    else
+        log "SUCCESS" "Bash 版本检查通过: $bash_version"
+    fi
+    
+    # 检查是否为 root 用户（不推荐生产环境使用 root）
+    if [[ "$EUID" -eq 0 ]]; then
+        log "WARN" "检测到 root 用户运行，生产环境建议使用非 root 用户"
+    fi
+    
+    # 检查脚本来源
+    if [[ -z "${CURL_EXECUTION:-}" ]]; then
+        log "WARN" "建议通过 curl 执行: curl -fsSL $SCRIPT_URL | bash"
+    fi
+    
+    log "SUCCESS" "安全检查完成"
+}
+
+# 验证脚本完整性
+verify_script() {
+    log "INFO" "🔐 验证脚本完整性..."
+    
+    # 尝试下载 SHA256 校验和
+    if curl -fsSL "${SCRIPT_SHA256_URL}" -o /tmp/install.sh.sha256 2>/dev/null; then
+        if command_exists sha256sum; then
+            if echo "$(cat /tmp/install.sh.sha256)" | sha256sum -c - > /dev/null 2>&1; then
+                log "SUCCESS" "脚本完整性验证通过"
+            else
+                log "WARN" "脚本完整性验证失败（校验和不匹配）"
+            fi
+        elif command_exists shasum; then
+            if shasum -a 256 -c /tmp/install.sh.sha256 > /dev/null 2>&1; then
+                log "SUCCESS" "脚本完整性验证通过"
+            else
+                log "WARN" "脚本完整性验证失败"
+            fi
+        fi
+        rm -f /tmp/install.sh.sha256
+    else
+        log "WARN" "无法下载校验和文件，跳过完整性验证"
+    fi
+}
+
+# 确认对话框
 confirm() {
     local message="$1"
     local default="${2:-n}"
+    
+    if [[ "${DRY_RUN}" == "1" ]]; then
+        log "INFO" "[模拟] 确认: $message"
+        return 0
+    fi
     
     if [[ "${AUTO_ACCEPT}" == "1" ]]; then
         log "INFO" "自动确认: $message"
@@ -91,26 +266,22 @@ confirm() {
     esac
 }
 
-# 等待用户按键（非交互模式下跳过）
+# 等待用户按键
 wait_for_key() {
-    if [[ "${AUTO_ACCEPT}" == "1" ]]; then
-        log "INFO" "跳过用户交互，继续执行..."
+    if [[ "${DRY_RUN}" == "1" ]] || [[ "${AUTO_ACCEPT}" == "1" ]]; then
         return
     fi
     
-    # 检查是否在交互式终端中
     if [[ -t 0 ]]; then
         log "INFO" "按任意键继续（Ctrl+C退出）..."
         read -n 1 -s -r
         echo
     else
-        # 非交互式环境，直接继续
-        log "INFO" "非交互式环境，自动继续执行..."
-        return
+        log "INFO" "非交互式环境，自动继续..."
     fi
 }
 
-# 显示横幅
+# ==================== 显示函数 ====================
 show_banner() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "${PURPLE}  OpenClaw 安全安装 v${SCRIPT_VERSION}${NC}"
@@ -118,12 +289,13 @@ show_banner() {
     echo
     echo -e "${CYAN}🚀 AI 助手 | 🔒 安全部署 | 🌐 跨平台支持${NC}"
     echo
-    echo -e "${YELLOW}⚡ 支持的提供商: MiniMax | Claude | GPT${NC}"
+    echo -e "${YELLOW}⚡ 支持模式: ${INSTALL_MODE^^} ${NC}"
+    echo -e "${YELLOW}⚡ LLM 提供商: ${LLM_PROVIDER} ${NC}"
     echo -e "${YELLOW}🔧 系统支持: macOS | Ubuntu 20.04+${NC}"
     echo
 }
 
-# 检测系统
+# ==================== 系统检测 ====================
 detect_system() {
     local uname_s
     uname_s="$(uname -s)"
@@ -139,45 +311,149 @@ detect_system() {
                 local ubuntu_version
                 ubuntu_version=$(grep "DISTRIB_RELEASE" /etc/lsb-release | cut -d'=' -f2)
                 if [[ $(echo "$ubuntu_version" | cut -d'.' -f1) -lt 20 ]]; then
-                    error_exit "不支持的Ubuntu版本：$ubuntu_version（需要20.04+）"
+                    error_exit "不支持的 Ubuntu 版本：$ubuntu_version（需要 20.04+）"
                 fi
                 os="ubuntu"
                 log "INFO" "检测到系统: Ubuntu $ubuntu_version"
             else
-                error_exit "不支持的Linux发行版（仅适配Ubuntu 20.04+）"
+                # 检查其他 Linux 发行版
+                if [[ -f "/etc/os-release" ]]; then
+                    local os_id
+                    os_id=$(grep "^ID=" /etc/os-release | cut -d'"' -f2)
+                    case "$os_id" in
+                        debian|fedora|centos|arch)
+                            os="$os_id"
+                            log "INFO" "检测到系统: $os_id (实验性支持)"
+                            ;;
+                        *)
+                            error_exit "不支持的 Linux 发行版"
+                            ;;
+                    esac
+                else
+                    error_exit "不支持的 Linux 发行版"
+                fi
             fi
             ;;
         *)
-            error_exit "不支持的系统：$uname_s（仅适配macOS和Ubuntu）"
+            error_exit "不支持的系统：$uname_s"
             ;;
     esac
     
     echo "$os"
 }
 
-# 检查前置条件
+# ==================== 前置条件检查 ====================
 check_prerequisites() {
     log "INFO" "检查前置条件..."
     
     # 检查网络连接
     log "INFO" "检查网络连接..."
     if ! curl -s --connect-timeout 5 https://api.minimax.chat &> /dev/null; then
-        log "WARN" "网络连接异常，可能会影响安装过程"
+        log "WARN" "网络连接异常"
+    else
+        log "SUCCESS" "网络连接正常"
     fi
     
-    # 检查磁盘空间（至少需要2GB）
+    # 检查磁盘空间（至少需要 2GB）
     local available_space
     available_space=$(df . | awk 'NR==2 {print $4}')
-    local required_space=2097152  # 2GB in KB
+    local required_space=2097152
     
     if [[ $available_space -lt $required_space ]]; then
-        error_exit "磁盘空间不足，至少需要2GB可用空间"
+        error_exit "磁盘空间不足，至少需要 2GB"
     fi
     
-    log "INFO" "前置条件检查通过"
+    log "SUCCESS" "前置条件检查通过"
+    log "INFO" "可用磁盘空间: $((available_space / 1024 / 1024)) GB"
 }
 
-# 安装系统依赖
+# ==================== Docker 模式 ====================
+check_docker() {
+    if ! command_exists docker; then
+        return 1
+    fi
+    
+    if ! docker ps &> /dev/null; then
+        return 1
+    fi
+    
+    return 0
+}
+
+install_docker() {
+    log "INFO" "安装 Docker..."
+    
+    local os="$1"
+    
+    case "$os" in
+        "macos")
+            log "INFO" "macOS 请从 https://docker.com 下载 Docker Desktop"
+            return 1
+            ;;
+        "ubuntu"|"debian")
+            curl -fsSL https://get.docker.com | sh
+            sudo usermod -aG docker "$USER"
+            log "SUCCESS" "Docker 安装完成，请重新登录以应用用户组"
+            ;;
+    esac
+}
+
+run_docker_install() {
+    log "INFO" "🚀 开始 Docker 模式安装..."
+    
+    if ! check_docker; then
+        if confirm "Docker 未安装或未运行，是否安装 Docker？" "y"; then
+            install_docker "ubuntu"
+        else
+            error_exit "Docker 是必需的"
+        fi
+    fi
+    
+    # 拉取官方镜像
+    log "INFO" "拉取 OpenClaw 官方镜像..."
+    if [[ "${DRY_RUN}" != "1" ]]; then
+        docker pull alpine/openclaw:latest
+    fi
+    
+    # 创建配置目录
+    mkdir -p "$HOME/.openclaw"
+    
+    # 启动容器
+    log "INFO" "启动 OpenClaw 容器..."
+    if [[ "${DRY_RUN}" != "1" ]]; then
+        docker run -d \
+            --name openclaw \
+            --restart unless-stopped \
+            -p 18789:18789 \
+            -v "$HOME/.openclaw:/home/node/.openclaw" \
+            alpine/openclaw:latest
+    fi
+    
+    log "SUCCESS" "Docker 模式安装完成"
+    show_docker_guide
+}
+
+show_docker_guide() {
+    echo
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}        🎉 Docker 安装完成！${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo
+    echo -e "${CYAN}📋 后续步骤:${NC}"
+    echo "1. 启动容器: docker start openclaw"
+    echo "2. 查看日志: docker logs -f openclaw"
+    echo "3. 访问控制台: http://localhost:18789"
+    echo "4. 获取 Token: docker exec openclaw openclaw token"
+    echo
+    echo -e "${CYAN}🔧 常用命令:${NC}"
+    echo "  docker start openclaw    # 启动"
+    echo "  docker stop openclaw     # 停止"
+    echo "  docker restart openclaw  # 重启"
+    echo "  docker logs -f openclaw # 查看日志"
+    echo
+}
+
+# ==================== 原生模式安装 ====================
 install_dependencies() {
     local os="$1"
     log "INFO" "安装系统依赖..."
@@ -188,7 +464,7 @@ install_dependencies() {
             brew update
             brew install curl wget git
             ;;
-        "ubuntu")
+        "ubuntu"|"debian")
             log "INFO" "更新系统包..."
             sudo apt update && sudo apt upgrade -y
             
@@ -199,271 +475,222 @@ install_dependencies() {
             echo 'unattended-upgrades unattended-upgrades/enable_auto_updates boolean true' | sudo debconf-set-selections
             sudo dpkg-reconfigure -f noninteractive unattended-upgrades
             ;;
+        "fedora"|"centos")
+            sudo dnf install -y curl wget git ufw
+            ;;
     esac
     
-    log "INFO" "系统依赖安装完成"
+    log "SUCCESS" "系统依赖安装完成"
 }
 
-# 安装Homebrew（macOS）
 install_homebrew() {
     if command_exists brew; then
-        log "INFO" "Homebrew已安装"
+        log "INFO" "Homebrew 已安装"
         return
     fi
     
-    log "INFO" "正在安装Homebrew..."
+    log "INFO" "安装 Homebrew..."
     if ! /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
-        error_exit "Homebrew安装失败"
+        error_exit "Homebrew 安装失败"
     fi
     
-    # 添加到PATH
     if [[ -d "/opt/homebrew/bin" ]]; then
         export PATH="/opt/homebrew/bin:$PATH"
         echo 'export PATH="/opt/homebrew/bin:$PATH"' >> "$HOME/.zshrc"
     fi
     
-    log "INFO" "Homebrew安装完成"
+    log "SUCCESS" "Homebrew 安装完成"
 }
 
-# 配置Tailscale和防火墙
 configure_network_security() {
     local os="$1"
     
     if [[ "${SKIP_TAILSCALE}" == "1" ]]; then
-        log "INFO" "跳过Tailscale配置（SKIP_TAILSCALE=1）"
+        log "INFO" "跳过 Tailscale 配置"
         return
     fi
     
     log "INFO" "配置网络安全..."
     
-    # 安装Tailscale
+    # 安装 Tailscale
     if ! command_exists tailscale; then
-        log "INFO" "正在安装Tailscale..."
+        log "INFO" "安装 Tailscale..."
         if ! curl -fsSL https://tailscale.com/install.sh | sh; then
-            log "WARN" "Tailscale安装失败，请手动安装"
+            log "WARN" "Tailscale 安装失败"
+        else
+            log "SUCCESS" "Tailscale 安装完成"
+            echo "请运行: sudo tailscale up"
         fi
-        
-        if command_exists tailscale; then
-            log "INFO" "Tailscale安装成功，请手动完成授权："
-            echo "sudo tailscale up"
-            echo "复制URL到浏览器完成授权"
-            
-            if ! confirm "是否已完成Tailscale授权？" "n"; then
-                log "WARN" "跳过Tailscale配置，可稍后手动完成"
-            fi
-        fi
-    else
-        log "INFO" "Tailscale已安装"
     fi
     
-    # 配置防火墙
     configure_firewall "$os"
 }
 
-# 配置防火墙
 configure_firewall() {
     local os="$1"
-    log "INFO" "配置防火墙规则..."
+    log "INFO" "配置防火墙..."
     
     case "$os" in
         "macos")
-            log "INFO" "macOS防火墙配置（请确保系统防火墙已启用）"
+            log "INFO" "macOS 防火墙（请确保系统防火墙已启用）"
             ;;
-        "ubuntu")
-            # 重置防火墙规则
+        "ubuntu"|"debian")
             sudo ufw --force reset
-            
-            # 设置默认策略
             sudo ufw default deny incoming
             sudo ufw default allow outgoing
             
-            # 允许Tailscale网络访问SSH（如果Tailscale已安装）
             if command_exists tailscale && ip link show tailscale0 &> /dev/null; then
                 sudo ufw allow in on tailscale0 to any port 22
             fi
             
-            # 启用防火墙
             sudo ufw --force enable
             sudo ufw --force status
             ;;
     esac
     
-    log "INFO" "防火墙配置完成"
+    log "SUCCESS" "防火墙配置完成"
 }
 
-# 安装Node.js
 install_nodejs() {
-    log "INFO" "安装Node.js 24..."
+    log "INFO" "安装 Node.js 24..."
     
-    # 安装nvm
+    # 安装 nvm
     if ! command_exists nvm; then
-        log "INFO" "安装nvm..."
+        log "INFO" "安装 nvm..."
+        export NVM_DIR="${XDG_CONFIG_HOME:-$HOME/.nvm}"
         if ! curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash; then
-            error_exit "nvm安装失败"
+            error_exit "nvm 安装失败"
         fi
         
-        # 加载nvm环境
-        export NVM_DIR="${XDG_CONFIG_HOME:-$HOME/.nvm}"
-        if [[ -s "$NVM_DIR/nvm.sh" ]]; then
-            # shellcheck source=/dev/null
-            source "$NVM_DIR/nvm.sh"
-        fi
+        # 加载 nvm
+        # shellcheck source=/dev/null
+        source "$NVM_DIR/nvm.sh" 2>/dev/null || true
     fi
     
-    # 安装Node.js
+    # 安装 Node.js
+    export NVM_DIR="${XDG_CONFIG_HOME:-$HOME/.nvm}"
+    # shellcheck source=/dev/null
+    source "$NVM_DIR/nvm.sh" 2>/dev/null || true
+    
     if command_exists nvm; then
-        nvm install 24 || error_exit "Node.js安装失败"
+        nvm install 24 || error_exit "Node.js 安装失败"
         nvm use 24
         nvm alias default 24
         
         local node_version
         node_version=$(node --version)
-        log "INFO" "Node.js安装成功: $node_version"
+        log "SUCCESS" "Node.js 安装成功: $node_version"
     else
-        error_exit "nvm安装失败"
+        error_exit "nvm 不可用"
     fi
 }
 
-# 安装OpenClaw
 install_openclaw() {
-    log "INFO" "安装OpenClaw..."
+    log "INFO" "安装 OpenClaw..."
     
     if command_exists openclaw; then
-        log "INFO" "OpenClaw已安装"
+        log "INFO" "OpenClaw 已安装: $(openclaw --version 2>/dev/null || echo "unknown")"
         return
     fi
     
-    # 尝试从npm安装
+    # 从 npm 安装
     if npm install -g @openclaw/cli 2>/dev/null; then
-        log "INFO" "从npm安装OpenClaw成功"
-    elif curl -fsSL https://openclaw.ai/install.sh | bash; then
-        log "INFO" "从官方脚本安装OpenClaw成功"
-    else
-        error_exit "OpenClaw安装失败"
+        log "SUCCESS" "从 npm 安装成功"
+    elif [[ "${DRY_RUN}" != "1" ]]; then
+        error_exit "OpenClaw 安装失败"
     fi
     
     # 验证安装
-    if ! command_exists openclaw; then
-        local npm_global_path="$HOME/.npm-global/bin"
-        if [[ -d "$npm_global_path" ]]; then
-            export PATH="$npm_global_path:$PATH"
-            echo "export PATH=\"$npm_global_path:\$PATH\"" >> "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null || true
-        fi
-    fi
-    
     if command_exists openclaw; then
         local version
         version=$(openclaw --version 2>/dev/null || echo "unknown")
-        log "INFO" "OpenClaw安装成功: $version"
-    else
-        error_exit "OpenClaw验证失败"
+        log "SUCCESS" "OpenClaw 安装成功: $version"
+    elif [[ "${DRY_RUN}" != "1" ]]; then
+        error_exit "OpenClaw 验证失败"
     fi
 }
 
-# 初始化OpenClaw
 initialize_openclaw() {
-    log "INFO" "初始化OpenClaw..."
+    log "INFO" "初始化 OpenClaw..."
     
-    # 显示LLM提供商选择信息
     echo
-    log "INFO" "选择LLM提供商: ${LLM_PROVIDER}"
+    log "INFO" "LLM 提供商: ${LLM_PROVIDER}"
+    
     case "${LLM_PROVIDER}" in
         "minimax")
-            echo "📝 MiniMax 注册地址: https://api.minimax.chat/"
-            echo "🔑 需要准备: Group ID 和 API Key"
+            echo "📝 MiniMax: https://api.minimax.chat/"
             ;;
         "claude")
-            echo "📝 Claude 注册地址: https://console.anthropic.com/"
-            echo "🔑 需要准备: API Key"
+            echo "📝 Claude: https://console.anthropic.com/"
             ;;
         "gpt")
-            echo "📝 OpenAI 注册地址: https://platform.openai.com/"
-            echo "🔑 需要准备: API Key"
+            echo "📝 OpenAI: https://platform.openai.com/"
+            ;;
+        "ollama")
+            echo "📝 Ollama: 本地模型 (http://localhost:11434)"
             ;;
     esac
     echo
     
-    if [[ "${AUTO_ACCEPT}" == "1" ]]; then
+    if [[ "${AUTO_ACCEPT}" == "1" ]] || [[ "${DRY_RUN}" == "1" ]]; then
         log "INFO" "跳过交互式初始化"
-        log "INFO" "请稍后手动执行: openclaw onboard"
         return
     fi
     
-    if confirm "是否现在配置LLM提供商？" "y"; then
+    if confirm "是否现在配置 LLM 提供商？" "y"; then
         if openclaw onboard; then
-            log "INFO" "OpenClaw初始化完成"
+            log "SUCCESS" "OpenClaw 初始化完成"
         else
-            log "WARN" "初始化失败，可稍后手动执行: openclaw onboard"
+            log "WARN" "初始化失败，可稍后执行: openclaw onboard"
         fi
-    else
-        log "INFO" "跳过初始化，可稍后执行: openclaw onboard"
     fi
 }
 
-# 安装插件和配置安全
 install_plugins_security() {
     log "INFO" "安装插件和安全配置..."
     
-    # 安装Matrix插件
-    if command_exists openclaw; then
-        log "INFO" "安装Matrix插件..."
-        if openclaw plugins install @openclaw/matrix 2>/dev/null; then
-            log "INFO" "Matrix插件安装成功"
-        else
-            log "WARN" "Matrix插件安装失败，可稍后手动安装"
-        fi
-        
-        # 安装安全技能
-        log "INFO" "安装安全防护技能..."
-        
-        # 尝试安装各种安全技能
-        for skill in "skillguard" "prompt-guard"; do
-            if npx clawhub install "$skill" 2>/dev/null; then
-                log "INFO" "安全技能 $skill 安装成功"
-            else
-                log "WARN" "安全技能 $skill 安装失败"
-            fi
-        done
-        
-        # ACIP认知免疫
-        if openclaw skill install https://github.com/Dicklesworthstone/acip/tree/main 2>/dev/null; then
-            log "INFO" "ACIP认知免疫安装成功"
-        else
-            log "WARN" "ACIP认知免疫安装失败"
-        fi
+    if ! command_exists openclaw; then
+        log "WARN" "OpenClaw 未安装，跳过插件安装"
+        return
     fi
+    
+    # 安装安全技能
+    log "INFO" "安装安全防护技能..."
+    for skill in "skillguard" "prompt-guard"; do
+        if npx clawhub install "$skill" 2>/dev/null; then
+            log "SUCCESS" "安全技能 $skill 安装成功"
+        else
+            log "WARN" "安全技能 $skill 安装失败"
+        fi
+    done
     
     # 设置文件权限
     if [[ -d "$HOME/.openclaw" ]]; then
         chmod 700 "$HOME/.openclaw"
         find "$HOME/.openclaw" -name "*.json" -type f -exec chmod 600 {} \; 2>/dev/null || true
         find "$HOME/.openclaw" -name "*.key" -type f -exec chmod 600 {} \; 2>/dev/null || true
-        log "INFO" "文件权限设置完成"
+        log "SUCCESS" "文件权限设置完成"
     fi
     
-    # 禁用mDNS
-    local shell_config
-    if [[ -f "$HOME/.zshrc" ]]; then
-        shell_config="$HOME/.zshrc"
-    else
-        shell_config="$HOME/.bashrc"
-    fi
+    # 禁用 mDNS
+    local shell_config="$HOME/.zshrc"
+    [[ -f "$HOME/.bashrc" ]] && shell_config="$HOME/.bashrc"
     
     if ! grep -q "OPENCLAW_DISABLE_BONJOUR" "$shell_config" 2>/dev/null; then
         echo 'export OPENCLAW_DISABLE_BONJOUR=1' >> "$shell_config"
     fi
     
     export OPENCLAW_DISABLE_BONJOUR=1
-    log "INFO" "安全配置完成"
+    log "SUCCESS" "安全配置完成"
 }
 
-# 创建系统服务
+# ==================== 系统服务 ====================
 create_service() {
     local os="$1"
     log "INFO" "创建系统服务..."
     
     local openclaw_path
-    openclaw_path=$(which openclaw)
+    openclaw_path=$(which openclaw 2>/dev/null || echo "$HOME/.nvm/versions/node/v*/bin/openclaw")
     local log_dir="$HOME/.openclaw/logs"
     
     mkdir -p "$log_dir"
@@ -495,22 +722,19 @@ create_service() {
   <string>$log_dir/stdout.log</string>
   <key>StandardErrorPath</key>
   <string>$log_dir/stderr.log</string>
-  <key>WorkingDirectory</key>
-  <string>$HOME</string>
 </dict>
 </plist>
 EOF
             
             launchctl load "$plist_file" 2>/dev/null || log "WARN" "服务加载失败"
-            launchctl start com.openclaw.ai 2>/dev/null || log "WARN" "服务启动失败"
             ;;
             
-        "ubuntu")
+        "ubuntu"|"debian")
             local service_file="/etc/systemd/system/openclaw.service"
             
             sudo tee "$service_file" > /dev/null << EOF
 [Unit]
-Description=OpenClaw AI Assistant (Secure Deployment)
+Description=OpenClaw AI Assistant
 After=network-online.target
 Wants=network-online.target
 
@@ -534,14 +758,108 @@ EOF
             
             sudo systemctl daemon-reload 2>/dev/null || log "WARN" "服务重载失败"
             sudo systemctl enable openclaw 2>/dev/null || log "WARN" "服务启用失败"
-            sudo systemctl start openclaw 2>/dev/null || log "WARN" "服务启动失败"
             ;;
     esac
     
-    log "INFO" "系统服务配置完成"
+    log "SUCCESS" "系统服务配置完成"
 }
 
-# 显示完成指南
+# ==================== 卸载功能 ====================
+uninstall_openclaw() {
+    echo -e "${RED}⚠️  确认卸载 OpenClaw？${NC}"
+    
+    if ! confirm "此操作将删除所有配置和数据，是否继续？" "n"; then
+        log "INFO" "取消卸载"
+        exit 0
+    fi
+    
+    log "INFO" "开始卸载 OpenClaw..."
+    
+    # 停止服务
+    if command_exists openclaw; then
+        openclaw stop 2>/dev/null || true
+    fi
+    
+    # 删除服务
+    case "$(detect_system)" in
+        "macos")
+            launchctl unload "$HOME/Library/LaunchAgents/com.openclaw.ai.plist" 2>/dev/null || true
+            rm -f "$HOME/Library/LaunchAgents/com.openclaw.ai.plist"
+            ;;
+        "ubuntu"|"debian")
+            sudo systemctl stop openclaw 2>/dev/null || true
+            sudo systemctl disable openclaw 2>/dev/null || true
+            sudo rm -f /etc/systemd/system/openclaw.service
+            ;;
+    esac
+    
+    # 删除文件
+    rm -rf "$HOME/.openclaw"
+    rm -rf "$HOME/.nvm/versions/node" # 可选
+    
+    # 删除 npm 全局包
+    npm uninstall -g @openclaw/cli 2>/dev/null || true
+    
+    log "SUCCESS" "OpenClaw 卸载完成"
+}
+
+# ==================== 健康检查 ====================
+run_healthcheck() {
+    log "INFO" "🔍 运行健康检查..."
+    
+    local issues=0
+    
+    # 检查服务状态
+    if command_exists openclaw; then
+        if openclaw status &> /dev/null; then
+            log "SUCCESS" "OpenClaw 服务运行中"
+        else
+            log "WARN" "OpenClaw 服务未运行"
+            ((issues++))
+        fi
+    else
+        log "WARN" "OpenClaw 未安装"
+        ((issues++))
+    fi
+    
+    # 检查网络
+    if curl -s --connect-timeout 3 https://api.minimax.chat &> /dev/null; then
+        log "SUCCESS" "网络连接正常"
+    else
+        log "WARN" "网络连接异常"
+        ((issues++))
+    fi
+    
+    if [[ $issues -eq 0 ]]; then
+        log "SUCCESS" "健康检查通过"
+    else
+        log "WARN" "发现 $issues 个问题"
+    fi
+}
+
+# ==================== 辅助工具安装 ====================
+install_clawdock() {
+    log "INFO" "安装 ClawDock 辅助工具..."
+    
+    mkdir -p "$HOME/.clawdock"
+    
+    if curl -fsSL https://raw.githubusercontent.com/openclaw/openclaw/main/scripts/shell-helpers/clawdock-helpers.sh \
+        -o "$HOME/.clawdock/clawdock-helpers.sh"; then
+        
+        local shell_config="$HOME/.zshrc"
+        [[ -f "$HOME/.bashrc" ]] && shell_config="$HOME/.bashrc"
+        
+        if ! grep -q "clawdock-helpers.sh" "$shell_config"; then
+            echo "source $HOME/.clawdock/clawdock-helpers.sh" >> "$shell_config"
+        fi
+        
+        log "SUCCESS" "ClawDock 安装完成"
+    else
+        log "WARN" "ClawDock 安装失败"
+    fi
+}
+
+# ==================== 完成指南 ====================
 show_completion_guide() {
     local os="$1"
     echo
@@ -550,44 +868,62 @@ show_completion_guide() {
     echo -e "${GREEN}========================================${NC}"
     echo
     echo -e "${CYAN}🚀 快速开始:${NC}"
-    echo "1. 启动网关: openclaw gateway"
-    echo "2. 访问控制台: http://localhost:18789"
-    echo "3. 配置LLM提供商: openclaw onboard"
+    echo "  openclaw gateway          # 启动网关"
+    echo "  openclaw status          # 查看状态"
+    echo "  openclaw onboard         # 配置 LLM"
+    echo "  openclaw doctor          # 健康检查"
     echo
     echo -e "${CYAN}🔧 服务管理:${NC}"
     case "$os" in
         "macos")
-            echo "启动: launchctl start com.openclaw.ai"
-            echo "停止: launchctl stop com.openclaw.ai"
-            echo "日志: tail -f ~/.openclaw/logs/stdout.log"
+            echo "  launchctl start com.openclaw.ai"
+            echo "  launchctl stop com.openclaw.ai"
             ;;
-        "ubuntu")
-            echo "启动: sudo systemctl start openclaw"
-            echo "停止: sudo systemctl stop openclaw"
-            echo "日志: journalctl -u openclaw -f"
+        *)
+            echo "  sudo systemctl start openclaw"
+            echo "  sudo systemctl stop openclaw"
             ;;
     esac
     echo
-    echo -e "${CYAN}📚 文档和支持:${NC}"
-    echo "• 官方文档: https://openclaw.ai/docs"
-    echo "• 社区支持: https://community.openclaw.ai"
-    echo "• GitHub仓库: https://github.com/Espl0it/OpenClawInstall"
+    echo -e "${CYAN}📚 文档:${NC}"
+    echo "  https://openclaw.ai/docs"
     echo
     echo -e "${GREEN}✨ 感谢使用 OpenClaw！${NC}"
     echo
 }
 
-# 主安装函数
+# ==================== 主函数 ====================
 main() {
+    # 解析参数
+    parse_args "$@"
+    
+    # 加载配置
+    load_config
+    
     # 显示横幅
     show_banner
     
-    # 环境变量说明
+    # 安全检查
+    check_security
+    
+    # 脚本验证
+    verify_script
+    
+    # 显示配置信息
     if [[ "${DEBUG}" == "1" ]]; then
-        log "INFO" "调试模式已启用"
-        log "INFO" "AUTO_ACCEPT=${AUTO_ACCEPT}"
-        log "INFO" "SKIP_TAILSCALE=${SKIP_TAILSCALE}"
-        log "INFO" "LLM_PROVIDER=${LLM_PROVIDER}"
+        log "INFO" "安装模式: ${INSTALL_MODE}"
+        log "INFO" "LLM 提供商: ${LLM_PROVIDER}"
+        log "INFO" "安装目录: ${INSTALL_DIR}"
+    fi
+    
+    # 选择安装模式
+    if [[ "${INSTALL_MODE}" == "docker" ]]; then
+        if [[ "${SKIP_DOCKER}" != "1" ]]; then
+            if confirm "是否使用 Docker 模式安装？" "y"; then
+                run_docker_install
+                return
+            fi
+        fi
     fi
     
     # 检测系统
@@ -598,324 +934,48 @@ main() {
     check_prerequisites
     
     # 显示注意事项
+    echo
     echo -e "${YELLOW}⚠️  安装前准备:${NC}"
-    echo "• 确保有稳定的网络连接"
-    echo "• 准备LLM提供商的API密钥"
-    echo "• 确保有管理员权限"
+    echo "  • 确保有稳定的网络连接"
+    echo "  • 准备 LLM 提供商的 API 密钥"
+    echo "  • 确保有管理员权限"
     echo
     
     wait_for_key
     
     # 执行安装步骤
-    install_dependencies "$os"
-    configure_network_security "$os"
-    install_nodejs
-    install_openclaw
-    initialize_openclaw
-    install_plugins_security
-    create_service "$os"
+    if [[ "${DRY_RUN}" != "1" ]]; then
+        install_dependencies "$os"
+        configure_network_security "$os"
+        install_nodejs
+        install_openclaw
+        initialize_openclaw
+        install_plugins_security
+        create_service "$os"
+        install_clawdock
+    else
+        log "INFO" "[模拟] install_dependencies $os"
+        log "INFO" "[模拟] configure_network_security $os"
+        log "INFO" "[模拟] install_nodejs"
+        log "INFO" "[模拟] install_openclaw"
+        log "INFO" "[模拟] initialize_openclaw"
+        log "INFO" "[模拟] install_plugins_security"
+        log "INFO" "[模拟] create_service $os"
+        log "INFO" "[模拟] install_clawdock"
+    fi
     
     # 显示完成指南
     show_completion_guide "$os"
+    
+    # 运行健康检查
+    run_healthcheck
 }
 
-# ==================== 脚本入口点 ====================
-# 检查是否通过curl执行
+# ==================== 脚本入口 ====================
 if [[ -n "${CURL_EXECUTION:-}" ]] || [[ "$(basename "$0")" == "bash" ]]; then
-    # 处理命令行参数
-    case "${1:-}" in
-        "-h"|"--help")
-            echo "OpenClaw 安全安装脚本 v${SCRIPT_VERSION}"
-            echo
-            echo "用法: curl -fsSL $SCRIPT_URL | bash [选项]"
-            echo
-            echo "环境变量:"
-            echo "  DEBUG=1              启用调试模式"
-            echo "  AUTO_ACCEPT=1        自动确认所有提示"
-            echo "  SKIP_TAILSCALE=1     跳过Tailscale安装"
-            echo "  LLM_PROVIDER=<name>  LLM提供商 (minimax/claude/gpt)"
-            echo
-            echo "示例:"
-            echo "  curl -fsSL $SCRIPT_URL | bash"
-            echo "  DEBUG=1 curl -fsSL $SCRIPT_URL | bash"
-            echo "  AUTO_ACCEPT=1 curl -fsSL $SCRIPT_URL | bash"
-            echo "  LLM_PROVIDER=claude curl -fsSL $SCRIPT_URL | bash"
-            echo
-            exit 0
-            ;;
-    esac
-    
-    # 标记curl执行
     export CURL_EXECUTION=1
-    
-    # 执行主函数
     main "$@"
 else
-    log "ERROR" "此脚本应通过 curl 执行: curl -fsSL $SCRIPT_URL | bash"
+    log "ERROR" "请通过 curl 执行: curl -fsSL $SCRIPT_URL | bash"
     exit 1
 fi
-# ========================================
-# 工具箱功能 (qmd + Memos)
-
-# ========================================
-# 默认工具箱功能 (qmd + Memos)
-# qmd: 默认安装，自动索引
-# Memos: 默认笔记存储
-# ========================================
-
-WORKSPACE=${OPENCLAW_WORKSPACE:-/home/ubuntu/.openclaw/workspace}
-QMD_BIN="/home/ubuntu/.bun/bin/qmd"
-MEMOS_CONTAINER="memos"
-MEMOS_PORT="5230"
-
-# 工具箱函数
-cmd_tools_help() {
-    echo ""
-    echo "========================================"
-    echo "  OpenClaw 工具箱 (默认安装 qmd + Memos)"
-    echo "========================================"
-    echo ""
-    echo "  用法: $0 tools [命令] [参数]"
-    echo ""
-    echo "  默认安装:"
-    echo "    qmd 自动索引 memory/*.md"
-    echo "    memos 默认笔记存储服务"
-    echo ""
-    echo "  qmd 命令 (本地记忆):"
-    echo "    install     安装 qmd (首次运行自动执行)"
-    echo "    status      查看索引状态"
-    echo "    search      搜索记忆 (默认方式)"
-    echo "    embed       更新索引"
-    echo "    list        列出所有集合"
-    echo ""
-    echo "  memos 命令 (笔记存储):"
-    echo "    status      检查 Memos 状态"
-    echo "    logs       查看容器日志"
-    echo "    create     创建笔记"
-    echo "    sync       同步文件到 Memos"
-    echo "    report     同步报告到 Memos"
-    echo ""
-}
-
-# 默认：无参数时安装 qmd
-cmd_qmd_install() {
-    log "INFO" "安装 qmd 本地记忆系统（默认安装）..."
-
-    if ! command -v bun &> /dev/null; then
-        log "ERROR" "bun 未安装，请先安装 bun"
-        return 1
-    fi
-
-    log "INFO" "安装 qmd..."
-    bun install -g https://github.com/tobi/qmd
-
-    cd "$WORKSPACE"
-
-    # daily-logs (默认集合)
-    if ls memory/*.md &> /dev/null 2>/dev/null; then
-        cd memory
-        qmd collection add . --name daily-logs 2>/dev/null || log "WARN" "daily-logs 已存在"
-        log "INFO" "✓ daily-logs 集合已创建"
-        cd "$WORKSPACE"
-    fi
-
-    # workspace (工作区集合)
-    qmd collection add *.md --name workspace 2>/dev/null || log "WARN" "workspace 已存在"
-    log "INFO" "✓ workspace 集合已创建"
-
-    log "INFO" "生成 Embedding（首次需要下载模型约2GB）..."
-    qmd embed
-
-    # MCP 配置
-    mkdir -p config
-    cat > config/mcporter.json << 'EOF'
-{
-  "mcpServers": {
-    "qmd": {
-      "command": "/home/ubuntu/.bun/bin/qmd",
-      "args": ["mcp"]
-    }
-  }
-}
-EOF
-    log "INFO" "✓ MCP 配置已创建"
-
-    # 自动更新 cron
-    CRON_CMD="cd $WORKSPACE && qmd embed"
-    if ! crontab -l 2>/dev/null | grep -q "qmd embed"; then
-        (crontab -l 2>/dev/null; echo "0 3 * * * $CRON_CMD") | crontab -
-        log "INFO" "✓ cron 任务已添加（每天凌晨3点自动更新）"
-    fi
-
-    log "INFO" "✅ qmd 安装完成！"
-}
-
-cmd_qmd_status() {
-    cd "$WORKSPACE"
-    qmd status
-}
-
-cmd_qmd_search() {
-    cd "$WORKSPACE"
-    shift
-    if [ $# -lt 1 ]; then
-        echo "用法: $0 tools search <关键词>"
-        return 1
-    fi
-    qmd search daily-logs "$@" --hybrid
-}
-
-cmd_qmd_embed() {
-    cd "$WORKSPACE"
-    qmd embed
-}
-
-cmd_qmd_list() {
-    cd "$WORKSPACE"
-    qmd collection list
-}
-
-# Memos 作为默认笔记存储
-cmd_memos_status() {
-    if ! command -v docker &> /dev/null; then
-        log "ERROR" "Docker 未安装"
-        return 1
-    fi
-    if ! docker ps &> /dev/null; then
-        log "ERROR" "Docker 未运行"
-        return 1
-    fi
-
-    if docker ps --format '{{.Names}}' | grep -q "^${MEMOS_CONTAINER}$"; then
-        log "INFO" "✓ Memos 运行中 (默认笔记存储)"
-    else
-        log "WARN" "⚠ Memos 未运行"
-        log "INFO" "启动 Memos..."
-        docker run -d --name memos -p ${MEMOS_PORT}:5230 -v ~/.memos:/var/opt/memos ghcr.io/usememos/memos:latest
-        log "INFO" "✓ Memos 已启动"
-    fi
-}
-
-cmd_memos_logs() {
-    if ! command -v docker &> /dev/null; then
-        log "ERROR" "Docker 未安装"
-        return 1
-    fi
-    docker logs -f "$MEMOS_CONTAINER" --tail 50
-}
-
-cmd_memos_create() {
-    if ! command -v docker &> /dev/null; then
-        log "ERROR" "Docker 未安装"
-        return 1
-    fi
-    shift
-    if [ $# -lt 1 ]; then
-        echo "用法: $0 tools memos create <内容>"
-        return 1
-    fi
-    local content="$1"
-    docker exec "$MEMOS_CONTAINER" curl -s -X POST \
-        "http://localhost:${MEMOS_PORT}/api/v1/memos" \
-        -H "Content-Type: application/json" \
-        -d "{\"content\": \"${content}\", \"visibility\": \"PUBLIC\"}" 2>/dev/null
-    log "INFO" "✓ 笔记已创建"
-}
-
-cmd_memos_sync() {
-    if ! command -v docker &> /dev/null; then
-        log "ERROR" "Docker 未安装"
-        return 1
-    fi
-    shift
-    if [ $# -lt 1 ]; then
-        echo "用法: $0 tools memos sync <文件路径>"
-        return 1
-    fi
-    local file_path="$1"
-    if [ ! -f "$file_path" ]; then
-        log "ERROR" "文件不存在: ${file_path}"
-        return 1
-    fi
-    local content=$(cat "$file_path")
-    local filename=$(basename "$file_path")
-
-    log "INFO" "同步文件到 Memos: ${filename}"
-    docker exec "$MEMOS_CONTAINER" curl -s -X POST \
-        "http://localhost:${MEMOS_PORT}/api/v1/memos" \
-        -H "Content-Type: application/json" \
-        -d "{\"content\": \"${content}\", \"visibility\": \"PUBLIC\"}" 2>/dev/null
-    log "INFO" "✓ 已同步到 Memos"
-}
-
-# 同步报告到 Memos (默认功能)
-cmd_memos_report() {
-    if ! command -v docker &> /dev/null; then
-        log "ERROR" "Docker 未安装"
-        return 1
-    fi
-
-    # 同步 reports 目录下的报告
-    if [ ! -d "$WORKSPACE/reports" ]; then
-        log "WARN" "reports 目录不存在"
-        return 1
-    fi
-
-    log "INFO" "同步报告到 Memos（默认笔记存储）..."
-    local count=0
-    for report in "$WORKSPACE/reports"/*.md; do
-        if [ -f "$report" ]; then
-            local content=$(cat "$report")
-            local filename=$(basename "$report")
-            docker exec "$MEMOS_CONTAINER" curl -s -X POST \
-                "http://localhost:${MEMOS_PORT}/api/v1/memos" \
-                -H "Content-Type: application/json" \
-                -d "{\"content\": \"${content}\", \"visibility\": \"PUBLIC\"}" 2>/dev/null
-            ((count++))
-        fi
-    done
-    log "INFO" "✓ 已同步 ${count} 个报告到 Memos"
-}
-
-# 处理工具命令
-handle_tools() {
-    local subcmd="${1:-install}"  # 默认执行 install
-    shift
-
-    case "$subcmd" in
-        qmd)
-            local qmd_cmd="${1:-help}"
-            shift
-            case "$qmd_cmd" in
-                install) cmd_qmd_install ;;
-                status) cmd_qmd_status ;;
-                search) cmd_qmd_search "$@" ;;
-                embed) cmd_qmd_embed ;;
-                list) cmd_qmd_list ;;
-                help|"") cmd_tools_help ;;
-                *) log "ERROR" "未知 qmd 命令: $qmd_cmd" ;;
-            esac
-            ;;
-        memos)
-            local memos_cmd="${1:-status}"
-            shift
-            case "$memos_cmd" in
-                status) cmd_memos_status ;;
-                logs) cmd_memos_logs ;;
-                create) cmd_memos_create "$@" ;;
-                sync) cmd_memos_sync "$@" ;;
-                report) cmd_memos_report ;;
-                help|"") cmd_tools_help ;;
-                *) log "ERROR" "未知 memos 命令: $memos_cmd" ;;
-            esac
-            ;;
-        help|"")
-            cmd_tools_help
-            ;;
-        *)
-            # 默认当作 qmd install 执行
-            cmd_qmd_install
-            ;;
-    esac
-}
-
