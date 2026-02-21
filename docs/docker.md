@@ -123,3 +123,45 @@ services:
 2. **限制网络访问**: 使用防火墙规则
 3. **敏感数据**: 使用 Docker secrets 或环境变量
 4. **定期备份**: 备份 `~/.openclaw` 目录
+
+---
+
+## 容器内更新持久化
+
+在容器内执行 `npm install -g openclaw` 更新后，重启容器更新会丢失（因为在镜像内）。
+
+### 解决方案：使用卷挂载
+
+```bash
+# 挂载宿主机目录到容器
+docker run -d \
+  --name openclaw \
+  --restart unless-stopped \
+  -p 18789:18789 \
+  -v ~/.openclaw:/home/node/.openclaw \
+  -v ~/.openclaw/workspace:/home/node/.openclaw/workspace \
+  openclaw:latest
+```
+
+### 持久化关键目录
+
+| 目录 | 说明 |
+|------|------|
+| `~/.openclaw` | 配置目录 |
+| `~/.openclaw/workspace` | 工作区 |
+
+### 检查挂载
+
+```bash
+docker inspect openclaw | grep -A 20 "Mounts"
+```
+
+### 备份
+
+```bash
+# 备份配置
+docker cp openclaw:/home/node/.openclaw ./backup
+
+# 恢复
+docker cp ./backup/. openclaw:/home/node/.openclaw/
+```
