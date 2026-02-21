@@ -122,3 +122,68 @@ curl -fsSL https://raw.githubusercontent.com/Espl0it/OpenClawInstall/main/instal
 ```
 
 > 说明：原文档中的 `online_install.sh` 已改为使用 `install.sh` 以与当前仓库一致。
+
+---
+
+## Docker 模式问题
+
+### 1. 进入 Docker 容器
+
+```bash
+# 查看运行中的容器
+docker compose ps
+
+# 进入容器 (交互式)
+docker compose exec -it openclaw /bin/bash
+
+# 如果是手动创建的容器
+docker exec -it <container_id> /bin/bash
+```
+
+### 2. OpenClaw 命令未找到
+
+在 Docker 容器中，OpenClaw 通过 `npx` 运行，不是全局命令：
+
+```bash
+# 方式1: 使用 npx
+npx openclaw status
+
+# 方式2: 进入项目目录
+cd /home/node/.openclaw
+npx openclaw status
+
+# 方式3: 查看帮助
+npx openclaw --help
+
+# 方式4: 全局安装 (可选)
+npm install -g openclaw
+openclaw status
+```
+
+### 3. 容器内常用命令
+
+| 命令 | 说明 |
+|------|------|
+| `npx openclaw status` | 查看状态 |
+| `npx openclaw gateway start` | 启动 Gateway |
+| `npx openclaw gateway stop` | 停止 Gateway |
+| `npx openclaw gateway status` | 查看运行状态 |
+| `docker compose logs -f` | 查看日志 |
+| `docker compose restart` | 重启容器 |
+
+### 4. 常见 Docker 错误
+
+```bash
+# 容器未运行
+docker compose up -d
+
+# 查看日志
+docker compose logs -f
+
+# 重新构建
+docker compose build --no-cache
+
+# 删除并重新创建
+docker compose down
+docker compose up -d
+```

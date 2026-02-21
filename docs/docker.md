@@ -64,11 +64,38 @@ docker restart openclaw
 # 查看日志
 docker logs -f openclaw
 
-# 进入容器
-docker exec -it openclaw sh
+# 进入容器 (交互式)
+docker exec -it openclaw /bin/bash
+
+# 使用 docker compose
+docker compose exec openclaw bash
 
 # 获取 Token
 docker exec openclaw openclaw token
+```
+
+### 容器内使用 OpenClaw
+
+在 Docker 容器中，OpenClaw 通过 `npx` 运行：
+
+```bash
+# 进入容器
+docker exec -it openclaw /bin/bash
+
+# 查看状态
+npx openclaw status
+
+# 启动 Gateway
+npx openclaw gateway start
+
+# 停止 Gateway
+npx openclaw gateway stop
+
+# 查看帮助
+npx openclaw --help
+
+# 可选：全局安装
+npm install -g openclaw
 ```
 
 ## Docker Compose
